@@ -1,0 +1,915 @@
+{
+  "name": "Workflow 1 - Multi-Label Gmail to Google Sheets & Drive",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyX",
+              "value": 5,
+              "unit": "minutes"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "{label:label1 label:label2 label:label3}"
+        },
+        "options": {
+          "downloadAttachments": true
+        }
+      },
+      "id": "7fd8091b-2bff-4256-b0e4-a70ac3acb513",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        32,
+        368
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "13NXB0x7Jy6B6bQf",
+          "name": "Gmail account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "label",
+        "returnAll": true
+      },
+      "id": "55119650-edb4-479d-8abd-7a465f041fa8",
+      "name": "Get Gmail Labels",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        256,
+        368
+      ],
+      "executeOnce": true,
+      "webhookId": "6ea20770-f446-43c7-a387-f3f60794b33e",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "13NXB0x7Jy6B6bQf",
+          "name": "Gmail account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== CONFIG (edit these) =====\nconst TARGET_LABELS = ['label1', 'label2', 'label3'];   // keep in sync with the Gmail Trigger search\nconst ROOT_FOLDER_ID = '1_V2kI9mKaVevIiXEa0gZXYMwMYn_wrWX';     // Drive folder that will hold everything\nconst TZ = 'Asia/Manila';                               // timezone used for the date folders\n// ================================\n\nconst targets = TARGET_LABELS.map(l => l.toLowerCase());\n\nconst labelMap = {};\nfor (const l of $('Get Gmail Labels').all()) labelMap[l.json.id] = l.json.name;\n\nconst safeName = s => (s || '').replace(/[\\\\/]/g, '-').replace(/\\s+/g, ' ').trim();\nconst esc = s => s.replace(/\\\\/g, '\\\\\\\\').replace(/'/g, \"\\\\'\");   // for Drive query strings\n\nfunction parseSender(j) {\n  if (j.from && j.from.value && j.from.value.length) {\n    return { name: j.from.value[0].name || '', email: j.from.value[0].address || '' };\n  }\n  const raw = j.From || (j.from && j.from.text) || (typeof j.from === 'string' ? j.from : '') || '';\n  const m = raw.match(/^\\s*\"?([^\"<]*?)\"?\\s*<([^>]+)>\\s*$/);\n  return m ? { name: m[1].trim(), email: m[2].trim() } : { name: '', email: raw.trim() };\n}\n\nconst out = [];\nfor (const item of $('Gmail Trigger').all()) {\n  const j = item.json;\n  const sender = parseSender(j);\n  const ts = j.internalDate ? new Date(Number(j.internalDate)) : new Date(j.date);\n  const dateFolder = ts.toLocaleDateString('en-CA', { timeZone: TZ });      // YYYY-MM-DD\n  const receivedAt = ts.toLocaleString('sv-SE', { timeZone: TZ });          // YYYY-MM-DD HH:mm:ss\n\n  const binKeys = Object.keys(item.binary || {});\n  const attachmentNames = binKeys.map(k => item.binary[k].fileName || k);\n  const senderFolder = safeName(sender.name) || sender.email || 'Unknown sender';\n\n  const matched = (j.labelIds || [])\n    .map(id => labelMap[id])\n    .filter(n => n && targets.includes(n.toLowerCase()));\n\n  for (const label of matched) {\n    const labelFolder = safeName(label);\n    out.push({\n      json: {\n        messageId: j.id,\n        label,\n        senderName: sender.name,\n        senderEmail: sender.email,\n        subject: j.subject || j.Subject || '',\n        receivedAt,\n        attachmentCount: binKeys.length,\n        attachmentNames: attachmentNames.join(', '),\n        drivePath: binKeys.length ? `${labelFolder}/${dateFolder}/${senderFolder}` : '',\n        rootFolderId: ROOT_FOLDER_ID,\n        labelFolder, dateFolder, senderFolder,\n        labelFolderQ: esc(labelFolder),\n        dateFolderQ: esc(dateFolder),\n        senderFolderQ: esc(senderFolder)\n      },\n      binary: item.binary\n    });\n  }\n}\nreturn out;"
+      },
+      "id": "c31e468d-6f05-43bb-93e4-96498bdb50ec",
+      "name": "Resolve Labels & Sender",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        368
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1A3w5NTeIU-Fikgw17cPX3mxuOC4CMa95BAxImRyAQ4w",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "emails",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Received At": "={{ $json.receivedAt }}",
+            "Label": "={{ $json.label }}",
+            "Sender Name": "={{ $json.senderName }}",
+            "Sender Email": "={{ $json.senderEmail }}",
+            "Subject": "={{ $json.subject }}",
+            "Message ID": "={{ $json.messageId }}",
+            "Attachment Count": "={{ $json.attachmentCount }}",
+            "Attachment Names": "={{ $json.attachmentNames }}",
+            "Drive Folder Path": "={{ $json.drivePath }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Received At",
+              "displayName": "Received At",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Label",
+              "displayName": "Label",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Sender Name",
+              "displayName": "Sender Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Sender Email",
+              "displayName": "Sender Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Subject",
+              "displayName": "Subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Message ID",
+              "displayName": "Message ID",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Attachment Count",
+              "displayName": "Attachment Count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Attachment Names",
+              "displayName": "Attachment Names",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Drive Folder Path",
+              "displayName": "Drive Folder Path",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "df7c70d5-ff0f-4331-8d53-59d7eae57cc7",
+      "name": "Append to Google Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        736,
+        224
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "9MuHh71a8Ce5GGzV",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "fb2b89f0-585b-4c05-8260-ad715617d85b",
+              "leftValue": "={{ $json.attachmentCount }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8adedb77-7016-437e-9e1f-7cd70ac8f93c",
+      "name": "Has Attachments?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        736,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "f6cd3bd6-f2a3-4e7c-a626-843d68947e84",
+      "name": "Loop Over Items",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        960,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "searchMethod": "query",
+        "queryString": "=name = '{{ $('Loop Over Items').first().json.labelFolderQ }}' and mimeType = 'application/vnd.google-apps.folder' and '{{ $('Loop Over Items').first().json.rootFolderId }}' in parents and trashed = false",
+        "limit": 1,
+        "filter": {},
+        "options": {}
+      },
+      "id": "2c6e4335-2f5d-4529-9442-7f0cb2695df5",
+      "name": "Find Label Folder",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1184,
+        512
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "vpRL1Rj2yIPUvfH1",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "5a7491c0-fc88-41ad-aa3e-a5026c7eb56d",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ec75088d-8087-4f5e-b3c3-f84669e2ac8f",
+      "name": "Label Folder Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1392,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "folder",
+        "name": "={{ $('Loop Over Items').first().json.labelFolder }}",
+        "driveId": {
+          "__rl": true,
+          "value": "My Drive",
+          "mode": "list",
+          "cachedResultName": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "={{ $('Loop Over Items').first().json.rootFolderId }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "48c111e2-3406-4518-beee-0616009c1bb7",
+      "name": "Create Label Folder",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1616,
+        656
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "vpRL1Rj2yIPUvfH1",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "488a00c9-2ddc-42e8-a3af-6d86f9a1a97d",
+              "name": "folderId",
+              "value": "={{ $json.id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "34340d77-f4d2-4772-8758-6e88d987d899",
+      "name": "Set Label Folder ID",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1840,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "searchMethod": "query",
+        "queryString": "=name = '{{ $('Loop Over Items').first().json.dateFolderQ }}' and mimeType = 'application/vnd.google-apps.folder' and '{{ $('Set Label Folder ID').first().json.folderId }}' in parents and trashed = false",
+        "limit": 1,
+        "filter": {},
+        "options": {}
+      },
+      "id": "ab13105e-621f-478a-a644-677e121cb124",
+      "name": "Find Date Folder",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        2080,
+        512
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "vpRL1Rj2yIPUvfH1",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ccaf7123-e720-475b-84cd-26b17e2596d1",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "92d3185b-77d1-41d0-ad8e-fffc72dfbbff",
+      "name": "Date Folder Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2304,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "folder",
+        "name": "={{ $('Loop Over Items').first().json.dateFolder }}",
+        "driveId": {
+          "__rl": true,
+          "value": "My Drive",
+          "mode": "list",
+          "cachedResultName": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "={{ $('Set Label Folder ID').first().json.folderId }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "d4a9ce89-1066-400d-a084-3b8e67ed7e1b",
+      "name": "Create Date Folder",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        2512,
+        656
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "vpRL1Rj2yIPUvfH1",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b6832f43-4440-40f5-83be-25122488f278",
+              "name": "folderId",
+              "value": "={{ $json.id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "bd84b8ff-c979-45ef-a505-755bfe27ec19",
+      "name": "Set Date Folder ID",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2736,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "searchMethod": "query",
+        "queryString": "=name = '{{ $('Loop Over Items').first().json.senderFolderQ }}' and mimeType = 'application/vnd.google-apps.folder' and '{{ $('Set Date Folder ID').first().json.folderId }}' in parents and trashed = false",
+        "limit": 1,
+        "filter": {},
+        "options": {}
+      },
+      "id": "94258603-80dd-4582-b0de-7f72883c2484",
+      "name": "Find Sender Folder",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        2976,
+        512
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "vpRL1Rj2yIPUvfH1",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "caa3b2f7-8fc6-4b57-958e-bb9de24b86f7",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "cf19315b-f6f8-4b22-aef8-a3013546a7ab",
+      "name": "Sender Folder Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3200,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "folder",
+        "name": "={{ $('Loop Over Items').first().json.senderFolder }}",
+        "driveId": {
+          "__rl": true,
+          "value": "My Drive",
+          "mode": "list",
+          "cachedResultName": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "={{ $('Set Date Folder ID').first().json.folderId }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "d18f7620-3eca-45f0-b346-a0988a315314",
+      "name": "Create Sender Folder",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        3424,
+        656
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "vpRL1Rj2yIPUvfH1",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "29856be8-1c1b-480b-89d7-293f059413d9",
+              "name": "folderId",
+              "value": "={{ $json.id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a7104f9e-b087-4b6a-957c-38ea26eef2c1",
+      "name": "Set Sender Folder ID",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3632,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Re-attach the email's binaries (Drive nodes drop them) and emit one item per attachment\nconst email = $('Loop Over Items').first();\nconst folderId = $input.first().json.folderId;\n\nconst out = [];\nfor (const key of Object.keys(email.binary || {})) {\n  const bin = email.binary[key];\n  out.push({\n    json: {\n      fileName: bin.fileName || `${key}.${bin.fileExtension || 'bin'}`,   // original filename\n      folderId,\n      label: email.json.label,\n      sender: email.json.senderFolder,\n      date: email.json.dateFolder,\n      messageId: email.json.messageId\n    },\n    binary: { data: bin }\n  });\n}\nreturn out;"
+      },
+      "id": "83787ab8-0732-4e58-b3c8-5a439178bdc4",
+      "name": "Split Attachments",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3872,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "name": "={{ $json.fileName }}",
+        "driveId": {
+          "__rl": true,
+          "value": "My Drive",
+          "mode": "list",
+          "cachedResultName": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "={{ $json.folderId }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "5da2df20-1dd7-45c1-93a1-fc7daf197b08",
+      "name": "Upload to Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        4096,
+        512
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "vpRL1Rj2yIPUvfH1",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Setup\n1. Connect Gmail, Google Sheets and Google Drive credentials.\n2. Edit the CONFIG block in **Resolve Labels & Sender** (labels, root Drive folder ID, timezone).\n3. Edit the Search filter in **Gmail Trigger** to match those labels (Gmail syntax: spaces become hyphens).\n4. Pick your Sheet in **Append to Google Sheet**. Row 1 headers: Received At, Label, Sender Name, Sender Email, Subject, Message ID, Attachment Count, Attachment Names, Drive Folder Path.\n5. Drive layout: Root / label / YYYY-MM-DD / sender name / original filenames.",
+        "height": 300,
+        "width": 520
+      },
+      "id": "cff9a4af-1839-4290-9915-c21bbc1faf06",
+      "name": "Setup Notes",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        64,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Find Label Folder": {
+      "main": [
+        [
+          {
+            "node": "Label Folder Exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Label Folder Exists?": {
+      "main": [
+        [
+          {
+            "node": "Set Label Folder ID",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Label Folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Label Folder": {
+      "main": [
+        [
+          {
+            "node": "Set Label Folder ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Date Folder": {
+      "main": [
+        [
+          {
+            "node": "Date Folder Exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Date Folder Exists?": {
+      "main": [
+        [
+          {
+            "node": "Set Date Folder ID",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Date Folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Date Folder": {
+      "main": [
+        [
+          {
+            "node": "Set Date Folder ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Sender Folder": {
+      "main": [
+        [
+          {
+            "node": "Sender Folder Exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sender Folder Exists?": {
+      "main": [
+        [
+          {
+            "node": "Set Sender Folder ID",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Sender Folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Sender Folder": {
+      "main": [
+        [
+          {
+            "node": "Set Sender Folder ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Gmail Labels",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Gmail Labels": {
+      "main": [
+        [
+          {
+            "node": "Resolve Labels & Sender",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Labels & Sender": {
+      "main": [
+        [
+          {
+            "node": "Append to Google Sheet",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Has Attachments?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Attachments?": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Find Label Folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Label Folder ID": {
+      "main": [
+        [
+          {
+            "node": "Find Date Folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Date Folder ID": {
+      "main": [
+        [
+          {
+            "node": "Find Sender Folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Sender Folder ID": {
+      "main": [
+        [
+          {
+            "node": "Split Attachments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Attachments": {
+      "main": [
+        [
+          {
+            "node": "Upload to Drive",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to Drive": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "97a3d42c-adec-4cdd-9a3f-93c9f4ebe2e7",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "f4b3ca02e69eca209ed84599a9616e3c91ce5739753055cd987d4c2fa95be9f4"
+  },
+  "nodeGroups": [],
+  "id": "njqN2GZnE2MiycV5",
+  "tags": []
+}
