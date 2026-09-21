@@ -77,7 +77,7 @@ flowchart TD
 
 ## Setup
 
-1. Import `workflow/gmail-labels-to-sheets-drive.json` into n8n (Workflows → Import from File).
+1. Import `gmail-labels-to-sheets-drive.json` into n8n (Workflows → Import from File).
 2. Create Google OAuth2 credentials for Gmail, Google Sheets and Google Drive, and attach them to the matching nodes.
 3. Create a root folder in Drive and copy its ID from the URL.
 4. Edit the `CONFIG` block in the **Resolve Labels & Sender** node:
